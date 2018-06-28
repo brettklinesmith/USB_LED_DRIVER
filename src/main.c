@@ -51,7 +51,13 @@
 #include "stm32f1xx_hal.h"
 #include "usb_device.h"
 
-/* USER CODE BEGIN Includes */
+/* USER CODE BEGIN Includes
+ * changes
+ * so
+ * git
+ * will
+ * be
+ * happy */
 
 /* USER CODE END Includes */
 
