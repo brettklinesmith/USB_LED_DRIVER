@@ -49,7 +49,7 @@ extern PCD_HandleTypeDef hpcd_USB_FS;
 /**
 * @brief This function handles System tick timer.
 */
-void SysTick_Handler(void)
+__weak void SysTick_Handler(void)
 {
   /* USER CODE BEGIN SysTick_IRQn 0 */
 
@@ -85,7 +85,7 @@ void USB_LP_CAN1_RX0_IRQHandler(void)
 /**
 * @brief This function handles EXTI line[15:10] interrupts.
 */
-void EXTI15_10_IRQHandler(void)
+__weak void EXTI15_10_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI15_10_IRQn 0 */
 
