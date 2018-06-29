@@ -127,6 +127,8 @@ int main(void) {
 
 	nextState = patternAddess[patternIndex];	// Initialize nextState
 
+	while(!(RCC->CR & RCC_CR_HSERDY));
+
 	while (1) {
 		/* When updatePWM has a value of 1 the SysTick interrupt has determined
 		 * that the current state time has elapsed. The next state is read and
