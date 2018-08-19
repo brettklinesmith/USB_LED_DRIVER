@@ -1,50 +1,19 @@
 /**
  ******************************************************************************
  * File Name          : main.c
- * Description        : Main program body
- ******************************************************************************
- * This notice applies to any and all portions of this file
- * that are not between comment pairs USER CODE BEGIN and
- * USER CODE END. Other portions of this file, whether
- * inserted by the user or by software development tools
- * are owned by their respective copyright owners.
+ * Description        : All the work and magic pixie dust to make the LED
+ * 						driver work.
  *
- * Copyright (c) 2018 STMicroelectronics International N.V.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted, provided that the following conditions are met:
- *
- * 1. Redistribution of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- * 3. Neither the name of STMicroelectronics nor the names of other
- *    contributors to this software may be used to endorse or promote products
- *    derived from this software without specific written permission.
- * 4. This software, including modifications and/or derivative works of this
- *    software, must execute solely and exclusively on microcontroller or
- *    microprocessor devices manufactured by or for STMicroelectronics.
- * 5. Redistribution and use of this software other than as permitted under
- *    this license is void and will automatically terminate your rights under
- *    this license.
- *
- * THIS SOFTWARE IS PROVIDED BY STMICROELECTRONICS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS, IMPLIED OR STATUTORY WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
- * PARTICULAR PURPOSE AND NON-INFRINGEMENT OF THIRD PARTY INTELLECTUAL PROPERTY
- * RIGHTS ARE DISCLAIMED TO THE FULLEST EXTENT PERMITTED BY LAW. IN NO EVENT
- * SHALL STMICROELECTRONICS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
- * OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
- * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- ******************************************************************************
- */
+ * 						TODO:
+ * 						change to current pattern in RAM
+ * 						modify working pattern over USB
+ * 							design communication protocol
+ * 								read
+ * 								write
+ * 								swap??
+ * 								remove??
+ * 						store working pattern to ROM
+ ******************************************************************************/
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -57,24 +26,26 @@ CRC_HandleTypeDef hcrc;
 TIM_HandleTypeDef htim3;
 
 // Basically bools
-volatile uint8_t 	updatePWM = 1,		// Will cause the PWM period to step
-					changePattern = 0;	// Change to next saved pattern
+volatile uint8_t 	updatePWM 		= 1,	// Will cause the PWM period to step
+					changePattern 	= 0;	// Change to next saved pattern
 
 // Timing values
-volatile uint32_t 	currentTicks = 0,	// Value of SYSTICK
-					updateTicks = 1,	// Value of next PWM update
-					nextUpdateTime = 1,	// Duration of current output
-					fadeTicks = 0,		// Duration of fade
-					endOfFade = 0,		// Systick value at end of fade
-					stateTicks = 0,		// Duration of state
-					endOfState = 0;		// Systick value at end of state
+volatile uint32_t 	currentTicks 	= 0,	// Value of SYSTICK
+					updateTicks 	= 1,	// Value of next PWM update
+					nextUpdateTime 	= 1,	// Duration of current output
+					fadeTicks 		= 0,	// Duration of fade
+					endOfFade 		= 0,	// Systick value at end of fade
+					stateTicks 		= 0,	// Duration of state
+					endOfState 		= 0;	// Systick value at end of state
 
-/* Initialize patterns. Basically a Malloc() of existing pattern memory */
-static __attribute__((section("PATTERN_1")))   const volatile uint32_t pattern1[250];
+/* Initialize patterns. Basically a Malloc for pattern memory */
+static __attribute__((section("PATTERN_1")))   const volatile uint32_t pattern1[250];	// ROM
 static __attribute__((section("PATTERN_2")))   const volatile uint32_t pattern2[250];
 static __attribute__((section("PATTERN_3")))   const volatile uint32_t pattern3[250];
 static __attribute__((section("PATTERN_4")))   const volatile uint32_t pattern4[250];
 static __attribute__((section("PATTERN_5")))   const volatile uint32_t pattern5[250];
+
+volatile uint32_t workingPattern[250];	// RAM
 
 // Array of pointers to patterns to allow pattern changes and index for current pattern
 const volatile uint32_t *patternAddess[5] = { &pattern1, &pattern2, &pattern3,
@@ -91,6 +62,7 @@ void 		HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);	// PWM middle step? (HAL)
 void 		set_pwm_value(uint16_t[4]);						// Change PWM periods to these values
 void 		decodeState(uint32_t, uint32_t, uint16_t *);	// From words in memory to pattern state
 uint16_t 	decodeTime(uint16_t);							// Interpret time value
+void		arrayCopy(volatile uint32_t[250],const volatile uint32_t[250]);	// To handle array assignment because C doesn't
 
 int main(void) {
 
@@ -114,18 +86,21 @@ int main(void) {
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
-	uint16_t 	PWMPeriods[4] = { 0, 0, 0, 0 },		// Current/next PWM periods
-				targetPeriods[4] = { 0, 0, 0, 0 },	// PWM periods fading to
-				fadeOngoing = 0,					// bool for fading
-				fadeStepTicks = 10;   				// # of ms between fade steps
+	uint16_t 			PWMPeriods[4] = { 0, 0, 0, 0 },		// Current/next PWM periods
+						targetPeriods[4] = { 0, 0, 0, 0 },	// PWM periods fading to
+						fadeOngoing = 0,					// bool for fading
+						fadeStepTicks = 10;   				// # of ms between fade steps
 
-	int16_t 	offsetPeriods[4] = { 0, 0, 0, 0 };	// Fade change per step
+	int16_t 			offsetPeriods[4] = { 0, 0, 0, 0 };	// Fade change per step
 
-	uint32_t 	*nextState,							// Pointer to first word of next state
-				stateFirst,							// First 32-bit word of pattern state
-				stateSecond;						// Second 32-bit word of pattern state
+	volatile uint32_t	*nextState;							// Pointer to first word of next state
+	uint32_t 			stateFirst,							// First 32-bit word of pattern state
+						stateSecond;						// Second 32-bit word of pattern state
 
-	nextState = patternAddess[patternIndex];		// Initialize nextState
+	arrayCopy(workingPattern,pattern1);				// Start with first pattern
+	//workingPattern = pattern1;
+
+	nextState = &workingPattern[0];					// Initialize nextState
 
 	while (!(RCC->CR & RCC_CR_HSERDY));
 
@@ -169,7 +144,7 @@ int main(void) {
 				if ((stateSecond & 0x3) != 0x3) {
 					nextState++;					// If no EoF then increment
 				} else {
-					nextState = patternAddess[patternIndex]; // Reset to beginning of pattern
+					nextState = &workingPattern[0]; 	// Reset to beginning of pattern
 				}
 
 				decodeState(stateFirst, stateSecond, &targetPeriods); // Interpret pattern state
@@ -180,14 +155,14 @@ int main(void) {
 				offsetPeriods[2] = ((int16_t) targetPeriods[2] - (int16_t) PWMPeriods[2]) / (int16_t) (fadeTicks / fadeStepTicks);
 				offsetPeriods[3] = ((int16_t) targetPeriods[3] - (int16_t) PWMPeriods[3]) / (int16_t) (fadeTicks / fadeStepTicks);
 
-				fadeOngoing = 1; // Set flag to begin fade after update interrupt
+				fadeOngoing = 1; 					// Set flag to begin fade after update interrupt
 
-				nextUpdateTime = fadeStepTicks;	// Set time to read next pattern state
+				nextUpdateTime = fadeStepTicks;		// Set time to read next pattern state
 			}
 
 			set_pwm_value(PWMPeriods);				// Commit new PWM periods
 
-			updatePWM = 0;								// Reset PWM update flag
+			updatePWM = 0;							// Reset PWM update flag
 		}
 
 		//If button is pressed then change patterns
@@ -200,8 +175,11 @@ int main(void) {
 				patternIndex = 0;
 			}
 
-			nextState = patternAddess[patternIndex];// Set nextState pointer to new pattern's first state
-			fadeOngoing = 0;	// Clear fade flag so state is read from memory
+			arrayCopy(workingPattern,patternAddess[patternIndex]);
+			//workingPattern = patternAddess[patternIndex];	// Set nextState pointer to new pattern's first state
+			nextState = &workingPattern[0];			//Restart pattern
+
+			fadeOngoing = 0;						// Clear fade flag so state is read from memory
 			updatePWM = 1;							// Force PWM period update
 
 			changePattern = 0;						// Reset pattern change flag
@@ -285,7 +263,7 @@ static void MX_TIM3_Init(void) {
 	htim3.Instance = TIM3;
 	htim3.Init.Prescaler = 0;
 	htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-	htim3.Init.Period = 0xFFF;						// Resolution of PWM timer
+	htim3.Init.Period = 0xFFF;					// Resolution of PWM timer
 	htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
 	htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 	if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
@@ -354,14 +332,10 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitTypeDef GPIO_InitStruct;
 
 	// GPIO Ports Clock Enable
-	__HAL_RCC_GPIOA_CLK_ENABLE()
-	;
-	__HAL_RCC_GPIOB_CLK_ENABLE()
-	;
-	__HAL_RCC_GPIOC_CLK_ENABLE()
-	;
-	__HAL_RCC_GPIOD_CLK_ENABLE()
-	;
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+	__HAL_RCC_GPIOD_CLK_ENABLE();
 
 	/*Configure GPIO pin Output Level */
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
@@ -511,6 +485,12 @@ uint16_t decodeTime(uint16_t time) {
 	return (0);
 }
 
+void arrayCopy(volatile uint32_t destination[250],const volatile uint32_t source[250]){
+	for(int i = 0; i < 250; i++){
+		destination[i] = source[i];
+	}
+}
+
 /* SysTick interrupt handler */
 void SysTick_Handler(void) {
 	HAL_IncTick();
@@ -561,5 +541,3 @@ void assert_failed(uint8_t* file, uint32_t line)
 }
 
 #endif
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
