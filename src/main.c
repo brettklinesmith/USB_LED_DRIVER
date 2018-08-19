@@ -58,39 +58,39 @@ TIM_HandleTypeDef htim3;
 
 // Basically bools
 volatile uint8_t 	updatePWM = 1,		// Will cause the PWM period to step
-					changePattern = 0;		// Change to next saved pattern
+					changePattern = 0;	// Change to next saved pattern
 
 // Timing values
-volatile uint32_t 	currentTicks = 0,		// Value of SYSTICK
-					updateTicks = 1,		// Value of next PWM update
-					nextUpdateTime = 1,		// Duration of current output
+volatile uint32_t 	currentTicks = 0,	// Value of SYSTICK
+					updateTicks = 1,	// Value of next PWM update
+					nextUpdateTime = 1,	// Duration of current output
 					fadeTicks = 0,		// Duration of fade
 					endOfFade = 0,		// Systick value at end of fade
 					stateTicks = 0,		// Duration of state
 					endOfState = 0;		// Systick value at end of state
 
 /* Initialize patterns. Basically a Malloc() of existing pattern memory */
-static __attribute__((section("PATTERN_1")))  const volatile uint32_t pattern1[250];
-static __attribute__((section("PATTERN_2")))  const volatile uint32_t pattern2[250];
-static __attribute__((section("PATTERN_3")))  const volatile uint32_t pattern3[250];
-static __attribute__((section("PATTERN_4")))  const volatile uint32_t pattern4[250];
-static __attribute__((section("PATTERN_5")))  const volatile uint32_t pattern5[250];
+static __attribute__((section("PATTERN_1")))   const volatile uint32_t pattern1[250];
+static __attribute__((section("PATTERN_2")))   const volatile uint32_t pattern2[250];
+static __attribute__((section("PATTERN_3")))   const volatile uint32_t pattern3[250];
+static __attribute__((section("PATTERN_4")))   const volatile uint32_t pattern4[250];
+static __attribute__((section("PATTERN_5")))   const volatile uint32_t pattern5[250];
 
 // Array of pointers to patterns to allow pattern changes and index for current pattern
 const volatile uint32_t *patternAddess[5] = { &pattern1, &pattern2, &pattern3,
-		&pattern4, &pattern5 };
+						&pattern4, &pattern5 };
 uint8_t patternIndex = 0;
 
 /* Private function prototypes -----------------------------------------------*/
-void SystemClock_Config(void);						// Configure clocks
-static void MX_GPIO_Init(void);						// Setup GPIO (HAL)
-static void MX_CRC_Init(void);						// Setup CRC timer (HAL)
-static void MX_TIM3_Init(void);						// Setup PWM timer (HAL)
-static void SYSTICK_Init(void);						// Setup Systick (HAL)
-void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);	// PWM middle step? (HAL)
-void set_pwm_value(uint16_t[4]);		// Change PWM periods to these values
-void decodeState(uint32_t, uint32_t, uint16_t *);// From words in memory to pattern state
-uint16_t decodeTime(uint16_t);						// Interpret time value
+void 		SystemClock_Config(void);						// Configure clocks
+static void MX_GPIO_Init(void);								// Setup GPIO (HAL)
+static void MX_CRC_Init(void);								// Setup CRC timer (HAL)
+static void MX_TIM3_Init(void);								// Setup PWM timer (HAL)
+static void SYSTICK_Init(void);								// Setup Systick (HAL)
+void 		HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);	// PWM middle step? (HAL)
+void 		set_pwm_value(uint16_t[4]);						// Change PWM periods to these values
+void 		decodeState(uint32_t, uint32_t, uint16_t *);	// From words in memory to pattern state
+uint16_t 	decodeTime(uint16_t);							// Interpret time value
 
 int main(void) {
 
@@ -114,26 +114,27 @@ int main(void) {
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
-	uint16_t PWMPeriods[4] = { 0, 0, 0, 0 },	// Current/next PWM periods
-			targetPeriods[4] = { 0, 0, 0, 0 },	// PWM periods fading to
-			fadeOngoing = 0,			// bool for fading
-			fadeStepTicks = 10;   		// # of ms between fade steps
+	uint16_t 	PWMPeriods[4] = { 0, 0, 0, 0 },		// Current/next PWM periods
+				targetPeriods[4] = { 0, 0, 0, 0 },	// PWM periods fading to
+				fadeOngoing = 0,					// bool for fading
+				fadeStepTicks = 10;   				// # of ms between fade steps
 
-	int16_t offsetPeriods[4] = { 0, 0, 0, 0 };	// Fade change per step
+	int16_t 	offsetPeriods[4] = { 0, 0, 0, 0 };	// Fade change per step
 
-	uint32_t *nextState,				// Pointer to first word of next state
-			stateFirst,					// First 32-bit word of pattern state
-			stateSecond;				// Second 32-bit word of pattern state
+	uint32_t 	*nextState,							// Pointer to first word of next state
+				stateFirst,							// First 32-bit word of pattern state
+				stateSecond;						// Second 32-bit word of pattern state
 
-	nextState = patternAddess[patternIndex];	// Initialize nextState
+	nextState = patternAddess[patternIndex];		// Initialize nextState
 
-	while(!(RCC->CR & RCC_CR_HSERDY));
+	while (!(RCC->CR & RCC_CR_HSERDY));
 
 	while (1) {
 		/* When updatePWM has a value of 1 the SysTick interrupt has determined
 		 * that the current state time has elapsed. The next state is read and
 		 * interpreted from memory and then current PWM periods are updated.
 		 */
+
 		if (updatePWM != 0) {
 
 			if (fadeOngoing == 1) {
@@ -171,23 +172,15 @@ int main(void) {
 					nextState = patternAddess[patternIndex]; // Reset to beginning of pattern
 				}
 
-				decodeState(stateFirst, stateSecond, &targetPeriods);// Interpret pattern state
+				decodeState(stateFirst, stateSecond, &targetPeriods); // Interpret pattern state
 
 				// Calculate change per fade step to achieve target period (cast everything for safety)
-				offsetPeriods[0] = ((int16_t) targetPeriods[0]
-						- (int16_t) PWMPeriods[0])
-						/ (int16_t) (fadeTicks / fadeStepTicks);
-				offsetPeriods[1] = ((int16_t) targetPeriods[1]
-						- (int16_t) PWMPeriods[1])
-						/ (int16_t) (fadeTicks / fadeStepTicks);
-				offsetPeriods[2] = ((int16_t) targetPeriods[2]
-						- (int16_t) PWMPeriods[2])
-						/ (int16_t) (fadeTicks / fadeStepTicks);
-				offsetPeriods[3] = ((int16_t) targetPeriods[3]
-						- (int16_t) PWMPeriods[3])
-						/ (int16_t) (fadeTicks / fadeStepTicks);
+				offsetPeriods[0] = ((int16_t) targetPeriods[0] - (int16_t) PWMPeriods[0]) / (int16_t) (fadeTicks / fadeStepTicks);
+				offsetPeriods[1] = ((int16_t) targetPeriods[1] - (int16_t) PWMPeriods[1]) / (int16_t) (fadeTicks / fadeStepTicks);
+				offsetPeriods[2] = ((int16_t) targetPeriods[2] - (int16_t) PWMPeriods[2]) / (int16_t) (fadeTicks / fadeStepTicks);
+				offsetPeriods[3] = ((int16_t) targetPeriods[3] - (int16_t) PWMPeriods[3]) / (int16_t) (fadeTicks / fadeStepTicks);
 
-				fadeOngoing = 1;// Set flag to begin fade after update interrupt
+				fadeOngoing = 1; // Set flag to begin fade after update interrupt
 
 				nextUpdateTime = fadeStepTicks;	// Set time to read next pattern state
 			}
@@ -234,7 +227,7 @@ void SystemClock_Config(void) {
 	RCC_OscInitStruct.HSIState = RCC_HSI_ON;
 	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
 	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-	RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL15;
+	RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
 	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
 		_Error_Handler(__FILE__, __LINE__);
 	}
@@ -476,16 +469,16 @@ void set_pwm_value(uint16_t periods[4]) {
  */
 void decodeState(uint32_t first, uint32_t second, uint16_t *periods) {
 
-	*periods = ((first & 0xFFC00000) >> 20);			// Channel 1 PWM period
+	*periods = ((first & 0xFFC00000) >> 20);				// Channel 1 PWM period
 	periods++;
-	*periods = ((first & 0x003FF000) >> 10);			// Channel 2 PWM period
+	*periods = ((first & 0x003FF000) >> 10);				// Channel 2 PWM period
 	periods++;
-	*periods = ((first & 0x00000FFC) >> 0);			// Channel 3 PWM period
+	*periods = ((first & 0x00000FFC) >> 0);					// Channel 3 PWM period
 	periods++;
-	*periods = ((second & 0xFFC00000) >> 20);			// Channel 4 PWM period
+	*periods = ((second & 0xFFC00000) >> 20);				// Channel 4 PWM period
 
-	stateTicks = decodeTime((second & 0xFFC) >> 2);		// Get dwell time
-	fadeTicks = decodeTime((second & 0x3FF000) >> 12);	// Get fade time
+	stateTicks 	= decodeTime((second & 0xFFC) >> 2);		// Get dwell time
+	fadeTicks 	= decodeTime((second & 0x3FF000) >> 12);	// Get fade time
 
 	//Set important times for fade and PWM update
 	endOfFade = HAL_GetTick() + fadeTicks;
@@ -518,7 +511,7 @@ uint16_t decodeTime(uint16_t time) {
 	return (0);
 }
 
-/* SysTick interrupt handler
+/* SysTick interrupt handler */
 void SysTick_Handler(void) {
 	HAL_IncTick();
 	HAL_SYSTICK_IRQHandler();
@@ -528,7 +521,7 @@ void SysTick_Handler(void) {
 		updatePWM = 1;					// If so set flag
 		updateTicks += nextUpdateTime;	// Set time for next update
 	}
-} */
+}
 
 /* If button is pressed set pattern change flag */
 void EXTI15_10_IRQHandler(void) {
