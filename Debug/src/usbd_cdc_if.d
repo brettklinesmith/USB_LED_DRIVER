@@ -1,4 +1,5 @@
-src/usbd_cdc_if.o: ../src/usbd_cdc_if.c ../include/usbd_cdc_if.h \
+src/usbd_cdc_if.o: ../src/usbd_cdc_if.c ../include/main.h \
+ ../include/usbd_cdc_if.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc/usbd_cdc.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_def.h \
@@ -32,6 +33,8 @@ src/usbd_cdc_if.o: ../src/usbd_cdc_if.c ../include/usbd_cdc_if.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_core.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h \
  ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h
+
+../include/main.h:
 
 ../include/usbd_cdc_if.h:
 

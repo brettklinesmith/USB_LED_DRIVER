@@ -63,6 +63,7 @@ void 		set_pwm_value(uint16_t[4]);						// Change PWM periods to these values
 void 		decodeState(uint32_t, uint32_t, uint16_t *);	// From words in memory to pattern state
 uint16_t 	decodeTime(uint16_t);							// Interpret time value
 void		arrayCopy(volatile uint32_t[250],const volatile uint32_t[250]);	// To handle array assignment because C doesn't
+void		inputHandler(uint8_t*, uint32_t);				// Handle input over virtual COM port
 
 int main(void) {
 
@@ -103,6 +104,8 @@ int main(void) {
 	nextState = &workingPattern[0];					// Initialize nextState
 
 	while (!(RCC->CR & RCC_CR_HSERDY));
+
+	//CDC_Transmit_FS("It works!\r\n", 10);
 
 	while (1) {
 		/* When updatePWM has a value of 1 the SysTick interrupt has determined
@@ -520,6 +523,16 @@ void _Error_Handler(char * file, int line) {
 	while (1) {
 	}
 	/* USER CODE END Error_Handler_Debug */
+}
+
+void inputHandler(uint8_t* buffer, uint32_t length){
+	uint32_t index=0;
+	while(index<length){
+		if(*(buffer + index) == 0x0D) break;
+		index++;
+	}
+	CDC_Transmit_FS(buffer,index);
+	HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 }
 
 #ifdef USE_FULL_ASSERT
