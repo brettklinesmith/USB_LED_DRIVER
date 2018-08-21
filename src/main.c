@@ -29,6 +29,8 @@ TIM_HandleTypeDef htim3;
 volatile uint8_t 	updatePWM 		= 1,	// Will cause the PWM period to step
 					changePattern 	= 0;	// Change to next saved pattern
 
+uint16_t 			fadeOngoing 	= 0;	// bool for fading
+
 // Timing values
 volatile uint32_t 	currentTicks 	= 0,	// Value of SYSTICK
 					updateTicks 	= 1,	// Value of next PWM update
@@ -36,7 +38,10 @@ volatile uint32_t 	currentTicks 	= 0,	// Value of SYSTICK
 					fadeTicks 		= 0,	// Duration of fade
 					endOfFade 		= 0,	// Systick value at end of fade
 					stateTicks 		= 0,	// Duration of state
-					endOfState 		= 0;	// Systick value at end of state
+					endOfState 		= 0,	// Systick value at end of state
+					*nextState;				// Pointer to first word of next state
+
+
 
 /* Initialize patterns. Basically a Malloc for pattern memory */
 static __attribute__((section("PATTERN_1")))   const volatile uint32_t pattern1[250];	// ROM
@@ -63,6 +68,7 @@ void 		set_pwm_value(uint16_t[4]);						// Change PWM periods to these values
 void 		decodeState(uint32_t, uint32_t, uint16_t *);	// From words in memory to pattern state
 uint16_t 	decodeTime(uint16_t);							// Interpret time value
 void		arrayCopy(volatile uint32_t[250],const volatile uint32_t[250]);	// To handle array assignment because C doesn't
+void		setPattern(uint8_t);							// Change to given pattern number
 void		inputHandler(uint8_t*, uint32_t);				// Handle input over virtual COM port
 
 int main(void) {
@@ -89,12 +95,10 @@ int main(void) {
 
 	uint16_t 			PWMPeriods[4] = { 0, 0, 0, 0 },		// Current/next PWM periods
 						targetPeriods[4] = { 0, 0, 0, 0 },	// PWM periods fading to
-						fadeOngoing = 0,					// bool for fading
 						fadeStepTicks = 10;   				// # of ms between fade steps
 
 	int16_t 			offsetPeriods[4] = { 0, 0, 0, 0 };	// Fade change per step
 
-	volatile uint32_t	*nextState;							// Pointer to first word of next state
 	uint32_t 			stateFirst,							// First 32-bit word of pattern state
 						stateSecond;						// Second 32-bit word of pattern state
 
@@ -106,6 +110,10 @@ int main(void) {
 	while (!(RCC->CR & RCC_CR_HSERDY));
 
 	//CDC_Transmit_FS("It works!\r\n", 10);
+
+	uint8_t temp1 = 6;
+
+	inputHandler(&temp1,100);
 
 	while (1) {
 		/* When updatePWM has a value of 1 the SysTick interrupt has determined
@@ -178,14 +186,7 @@ int main(void) {
 				patternIndex = 0;
 			}
 
-			arrayCopy(workingPattern,patternAddess[patternIndex]);
-			//workingPattern = patternAddess[patternIndex];	// Set nextState pointer to new pattern's first state
-			nextState = &workingPattern[0];			//Restart pattern
-
-			fadeOngoing = 0;						// Clear fade flag so state is read from memory
-			updatePWM = 1;							// Force PWM period update
-
-			changePattern = 0;						// Reset pattern change flag
+			setPattern(patternIndex);
 		}
 	}
 
@@ -494,6 +495,70 @@ void arrayCopy(volatile uint32_t destination[250],const volatile uint32_t source
 	}
 }
 
+void setPattern(uint8_t number){
+	patternIndex = number;
+
+	arrayCopy(workingPattern,patternAddess[patternIndex]);
+
+	nextState = &workingPattern[0];			// Restart pattern
+
+	fadeOngoing = 0;						// Clear fade flag so state is read from memory
+	updatePWM = 1;							// Force PWM period update
+	changePattern = 0;						// Reset pattern change flag
+}
+
+void inputHandler(uint8_t* buffer, uint32_t length){
+	uint8_t index;
+
+	if(*buffer == 0) {
+		if(*(buffer+1) < 5 ){
+			setPattern(*(buffer+1));
+			CDC_Transmit_FS("Set pattern number\n",18);
+		} else {
+			CDC_Transmit_FS("Set pattern error\n",17);
+		}
+
+	} else if(*buffer == 2) {
+		CDC_Transmit_FS(&patternIndex,1);
+	} else if(*buffer == 4) {
+		CDC_Transmit_FS("Set pattern\n",11);
+	} else if(*buffer == 6) {
+		//CDC_Transmit_FS("Get pattern\n",11);
+
+		index = 1;
+
+		while(index<250){
+			if((workingPattern[index] & 0x3) == 0x3) break;
+			index += 2;				// increment by 2 because a pattern step is 64 bits
+		}
+
+		index++;
+
+		uint32_t reversed[index],temp;
+
+		/* Reversing algorithm based on info from from:
+		   https://graphics.stanford.edu/~seander/bithacks.html#BitReverseObvious*/
+
+		for(uint8_t i=0 ; i < index; i++){
+			temp = workingPattern[i];
+		    temp = (((temp & 0xff00ff00) >> 8) | ((temp & 0x00ff00ff) << 8));
+		    reversed[i] = ((temp >> 16) | (temp << 16));
+
+		}
+
+		CDC_Transmit_FS(reversed,(index+1)*4);
+	} else {
+		index=0;
+
+		while(index<length){
+			if(*(buffer + index) == 0x0D) break;
+			index++;
+		}
+
+		CDC_Transmit_FS(buffer,index);
+	}
+}
+
 /* SysTick interrupt handler */
 void SysTick_Handler(void) {
 	HAL_IncTick();
@@ -523,16 +588,6 @@ void _Error_Handler(char * file, int line) {
 	while (1) {
 	}
 	/* USER CODE END Error_Handler_Debug */
-}
-
-void inputHandler(uint8_t* buffer, uint32_t length){
-	uint32_t index=0;
-	while(index<length){
-		if(*(buffer + index) == 0x0D) break;
-		index++;
-	}
-	CDC_Transmit_FS(buffer,index);
-	HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 }
 
 #ifdef USE_FULL_ASSERT
