@@ -1,6 +1,7 @@
 /**
  ******************************************************************************
  * File Name          : main.c
+ * Note for GitHub    : Looks best with tabs and indent size of 4
  * Description        : All the work and magic pixie dust to make the LED
  * 						driver work.
  *
