@@ -27,34 +27,36 @@ TIM_HandleTypeDef htim3;					//From CubeMX
 
 // Basically bools
 volatile uint8_t 	updatePWM 		= 1,	// Will cause the PWM period to step
-					changePattern 	= 0;	// Change to next saved pattern
-
-uint16_t 			fadeOngoing 	= 0;	// bool for fading TODO: could this be a uint8_t?
+					changePattern 	= 0,	// Change to next saved pattern
+					fadeOngoing 	= 0;	// bool for fading
 
 // Timing values
-volatile uint32_t 	currentTicks 	= 0,	// Value of SYSTICK
+volatile uint32_t 	currentTicks,			// Value of SYSTICK
 					updateTicks 	= 1,	// Value of next PWM update
 					nextUpdateTime 	= 1,	// Duration of current output
-					fadeTicks 		= 0,	// Duration of fade
-					endOfFade 		= 0,	// Systick value at end of fade
-					stateTicks 		= 0,	// Duration of state
-					endOfState 		= 0,	// Systick value at end of state
+					fadeTicks,				// Duration of fade
+					endOfFade,				// Systick value at end of fade
+					stateTicks,				// Duration of state
+					endOfState,				// Systick value at end of state
 					*nextState;				// Pointer to first word of next state
 
 
 
-/* Initialize patterns. Basically a Malloc for pattern memory */
+/* Initialize patterns. Basically a Malloc for pattern memory stored in non-volatile flash*/
 static __attribute__((section("PATTERN_1")))   const volatile uint32_t pattern1[250];	// ROM
 static __attribute__((section("PATTERN_2")))   const volatile uint32_t pattern2[250];
 static __attribute__((section("PATTERN_3")))   const volatile uint32_t pattern3[250];
 static __attribute__((section("PATTERN_4")))   const volatile uint32_t pattern4[250];
 static __attribute__((section("PATTERN_5")))   const volatile uint32_t pattern5[250];
 
-volatile uint32_t workingPattern[250];	// RAM
+/* Allocate space in RAM for the working pattern that can be written to more often and
+ * more easily than flash. Needs to be committed to flash to survive power cycle */
+volatile uint32_t workingPattern[250];
 
 // Array of pointers to patterns to allow pattern changes and index for current pattern
 const volatile uint32_t *patternAddess[5] = { &pattern1, &pattern2, &pattern3,
 						&pattern4, &pattern5 };
+
 uint8_t patternIndex = 0;
 
 /* Private function prototypes -----------------------------------------------*/
@@ -93,20 +95,16 @@ int main(void) {
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 	HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
-	uint16_t 			PWMPeriods[4] = { 0, 0, 0, 0 },		// Current/next PWM periods
-						targetPeriods[4] = { 0, 0, 0, 0 },	// PWM periods fading to
-						fadeStepTicks = 10;   				// # of ms between fade steps
+	uint16_t 	PWMPeriods[4] = { 0, 0, 0, 0 },		// Current/next PWM periods
+				targetPeriods[4] = { 0, 0, 0, 0 },	// PWM periods fading to
+				fadeStepTicks = 10;   				// # of ms between fade steps
 
-	int16_t 			offsetPeriods[4] = { 0, 0, 0, 0 };	// Fade change per step
+	int16_t 	offsetPeriods[4] = { 0, 0, 0, 0 };	// Fade change per step
 
-	uint32_t 			stateFirst,							// First 32-bit word of pattern state
-						stateSecond;						// Second 32-bit word of pattern state
+	uint32_t 	stateFirst,							// First 32-bit word of pattern state
+				stateSecond;						// Second 32-bit word of pattern state
 
-	setPattern(patternIndex);
-	// TODO delete -> arrayCopy(workingPattern,pattern1);				// Start with first pattern
-	//workingPattern = pattern1;
-
-	//nextState = &workingPattern[0];					// Initialize nextState
+	setPattern(patternIndex);						// Start with first pattern
 
 	while (!(RCC->CR & RCC_CR_HSERDY));				// Wait until external oscillator has settled
 
@@ -513,7 +511,7 @@ void arrayCopy(volatile uint32_t destination[250],const volatile uint32_t source
 	}
 }
 
-void setPattern(uint8_t number){
+void setPattern(uint8_t number){	//TODO: make sure it changes promptly even if fade is very slow
 	patternIndex = number;
 
 	arrayCopy(workingPattern,patternAddess[patternIndex]);
@@ -564,9 +562,9 @@ void inputHandler(uint8_t* buffer, uint32_t length){
 
 		}
 
-		CDC_Transmit_FS(reversed,(index+1)*4); //TODO: double check if +1 still necessary
+		CDC_Transmit_FS(reversed,(index)*4);
 	} else {
-		// If not valid input spit out the recieved buffer
+		// If not valid input spit out the received buffer
 		index=0;
 
 		while(index<length){
