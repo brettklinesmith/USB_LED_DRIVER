@@ -21,15 +21,14 @@
 #include "usb_device.h"
 
 /* Private variables ---------------------------------------------------------*/
-CRC_HandleTypeDef hcrc;
-
-TIM_HandleTypeDef htim3;
+CRC_HandleTypeDef hcrc;						//From CubeMX
+TIM_HandleTypeDef htim3;					//From CubeMX
 
 // Basically bools
 volatile uint8_t 	updatePWM 		= 1,	// Will cause the PWM period to step
 					changePattern 	= 0;	// Change to next saved pattern
 
-uint16_t 			fadeOngoing 	= 0;	// bool for fading
+uint16_t 			fadeOngoing 	= 0;	// bool for fading TODO: could this be a uint8_t?
 
 // Timing values
 volatile uint32_t 	currentTicks 	= 0,	// Value of SYSTICK
@@ -76,7 +75,7 @@ int main(void) {
 	// Reset of all peripherals, Initializes the Flash interface and the Systick.
 	HAL_Init();
 
-	// Configure the system clock
+	// Configure the system clocks
 	SystemClock_Config();
 
 	// Initialize all configured peripherals
@@ -102,18 +101,19 @@ int main(void) {
 	uint32_t 			stateFirst,							// First 32-bit word of pattern state
 						stateSecond;						// Second 32-bit word of pattern state
 
-	arrayCopy(workingPattern,pattern1);				// Start with first pattern
+	setPattern(patternIndex);
+	// TODO delete -> arrayCopy(workingPattern,pattern1);				// Start with first pattern
 	//workingPattern = pattern1;
 
-	nextState = &workingPattern[0];					// Initialize nextState
+	//nextState = &workingPattern[0];					// Initialize nextState
 
-	while (!(RCC->CR & RCC_CR_HSERDY));
+	while (!(RCC->CR & RCC_CR_HSERDY));				// Wait until external oscillator has settled
 
-	//CDC_Transmit_FS("It works!\r\n", 10);
-
+	// temporary code for debugging
 	uint8_t temp1 = 6;
 
 	inputHandler(&temp1,100);
+	// end of temporary code
 
 	while (1) {
 		/* When updatePWM has a value of 1 the SysTick interrupt has determined
@@ -142,6 +142,9 @@ int main(void) {
 
 					nextUpdateTime = fadeStepTicks;
 				}
+				
+				set_pwm_value(PWMPeriods);				// Commit new PWM periods
+				
 			} else {
 				// Should only run once per state at the very end of the fade
 				// TODO: check if this runs first or last now
@@ -153,7 +156,7 @@ int main(void) {
 
 				// check for EoF
 				if ((stateSecond & 0x3) != 0x3) {
-					nextState++;					// If no EoF then increment
+					nextState++;						// If no EoF then increment to next pattern state
 				} else {
 					nextState = &workingPattern[0]; 	// Reset to beginning of pattern
 				}
@@ -161,6 +164,7 @@ int main(void) {
 				decodeState(stateFirst, stateSecond, &targetPeriods); // Interpret pattern state
 
 				// Calculate change per fade step to achieve target period (cast everything for safety)
+				// TODO: redesign this so it handles large and small changes in the same algorithm
 				offsetPeriods[0] = ((int16_t) targetPeriods[0] - (int16_t) PWMPeriods[0]) / (int16_t) (fadeTicks / fadeStepTicks);
 				offsetPeriods[1] = ((int16_t) targetPeriods[1] - (int16_t) PWMPeriods[1]) / (int16_t) (fadeTicks / fadeStepTicks);
 				offsetPeriods[2] = ((int16_t) targetPeriods[2] - (int16_t) PWMPeriods[2]) / (int16_t) (fadeTicks / fadeStepTicks);
@@ -168,10 +172,10 @@ int main(void) {
 
 				fadeOngoing = 1; 					// Set flag to begin fade after update interrupt
 
-				nextUpdateTime = fadeStepTicks;		// Set time to read next pattern state
+				nextUpdateTime = fadeStepTicks;		// Store time to read next pattern state
 			}
 
-			set_pwm_value(PWMPeriods);				// Commit new PWM periods
+			//set_pwm_value(PWMPeriods);				// Commit new PWM periods
 
 			updatePWM = 0;							// Reset PWM update flag
 		}
@@ -179,14 +183,16 @@ int main(void) {
 		//If button is pressed then change patterns
 		if (changePattern == 1) {
 
-			//Check if on last pattern
+			//Check if current pattern is last one and inncrement appropriately
 			if (patternIndex < 4) {
 				patternIndex++;
 			} else {
 				patternIndex = 0;
 			}
 
-			setPattern(patternIndex);
+			setPattern(patternIndex);				// Change to next pattern
+			
+			changePattern = 0;						// Reset pattern change flag
 		}
 	}
 
@@ -247,7 +253,9 @@ void SystemClock_Config(void) {
 	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
 }
 
-/* CRC init function */
+/* CRC init function 
+ *  Unchanged from CubeMX import
+ */
 static void MX_CRC_Init(void) {
 
 	hcrc.Instance = CRC;
@@ -257,7 +265,10 @@ static void MX_CRC_Init(void) {
 
 }
 
-/* TIM3 init function */
+/* TIM3 init function 
+ * Mostly unchanged from CubeMX import
+ * Only PWM resolution and initial period changed 
+ */
 static void MX_TIM3_Init(void) {
 
 	TIM_ClockConfigTypeDef sClockSourceConfig;
@@ -330,6 +341,8 @@ static void MX_TIM3_Init(void) {
  PA2   ------> USART2_TX
  PA3   ------> USART2_RX
  PA8   ------> RCC_MCO
+  
+ * Unchanged from CubeMX import
  */
 static void MX_GPIO_Init(void) {
 
@@ -368,7 +381,9 @@ static void MX_GPIO_Init(void) {
 
 }
 
-/* SysTick init function */
+/* SysTick init function  
+ * Unchanged from CubeMX import
+ */
 static void SYSTICK_Init(void) {
 	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
 
@@ -416,34 +431,16 @@ void set_pwm_value(uint16_t periods[4]) {
 }
 
 /* A single pattern STEP requires two 32-bit registers. The have the form:
- * [red 10-bit value]   [green 10-bit value] [blue 10-bit value]  0x01
- * [white 10-bit value] [fade 10-bit value]  [dwell 10-bit value] 0x10
- * the last element in the pattern has the command bit (2 LSB bits) * of 11 to
- * signify EOF.
+ * [red 10-bit value]   [green 10-bit value] [blue 10-bit value]  [command 2-bit]
+ * [white 10-bit value] [fade 10-bit value]  [dwell 10-bit value] [command 2-bit]
  *
- * Fade and dwell times have 2 components. The two MSB bits define
- * the time base:
- * 		00 = 100ms 		range of    0:25.5 -    0:00.1
- * 		01 = seconds	range of    4:15.0 -    0:01.0
- * 		10 = 5 seconds	range of   21:15.0 -    0:05.0
- * 		11 = minutes	range of 4:15:00.0 - 0:01:00.0
+ * Command bits are 0x01 for first step register, 0x10 for second step register.
+ * If the second step register is 0x11 that signifies the end of the pattern (EOF).
  *
- * The eight LSB bits of the time values define the actual value in the form:
- *
- * 		[8-bit value] * timebase
- *
- * For a pattern of greater resolution multiple pattern values should be used
- * with the same color values, a fade of 100 ms, and a the necessary dwell
- * time to achieve the desired total dwell.
- *
- * 		ie. for 5 minutes and 17.6 seconds
- * 			10 * 3C   //5 minutes
- * 			00 * B0   //17.6 seconds
- */
-
-/* Take two words from memory and extract the 4 PWM periods, fade time, and dwell time.
- * Takes a 10-bit value for period and basically does a << 2 operation to them to fit
- * 12-bit resolution of PWM timer. Techically 99.93% is full intensity.
+ * This function takes two 32-bit words from memory and extracts the 4 PWM periods,
+ * fade time, and dwell time. While extracting PWM period a 10-bit value from the
+ * pattern step is basically left shifted 2 bits to fit put the values into the MSBs
+ * of the 12-bit resolution of PWM timer. Techically 99.993% is max intensity.
  */
 void decodeState(uint32_t first, uint32_t second, uint16_t *periods) {
 
@@ -458,12 +455,31 @@ void decodeState(uint32_t first, uint32_t second, uint16_t *periods) {
 	stateTicks 	= decodeTime((second & 0xFFC) >> 2);		// Get dwell time
 	fadeTicks 	= decodeTime((second & 0x3FF000) >> 12);	// Get fade time
 
-	//Set important times for fade and PWM update
+	//Store relevant times for fade and PWM update
 	endOfFade = HAL_GetTick() + fadeTicks;
 	endOfState = endOfFade + stateTicks;
 }
 
-/* Extract encoded time value*/
+/* Extract encoded time value
+ *
+ * Fade and dwell times have 2 components. The two MSB bits define the time base:
+ * 		00 = 100ms 		range of    0:25.5 -    0:00.1
+ * 		01 = seconds	range of    4:15.0 -    0:01.0
+ * 		10 = 5 seconds	range of   21:15.0 -    0:05.0
+ * 		11 = minutes	range of 4:15:00.0 - 0:01:00.0
+ *
+ * The eight LSB bits of the time values define the actual value in the form:
+ *
+ * 		[8-bit value] * timebase
+ *
+ * For patterns of greater timing resolution multiple pattern values should
+ * be used with the same color values, a fade of 0 ms, and the necessary
+ * dwell time to achieve the desired total dwell time.
+ *
+ * 		ie. for 5 minutes and 17.6 seconds
+ * 			10 * 3C   //5 minutes
+ * 			00 * B0   //17.6 seconds
+ */
 uint16_t decodeTime(uint16_t time) {
 	int timeBase;
 	timeBase = ((time & 0x300) >> 8);
@@ -489,6 +505,7 @@ uint16_t decodeTime(uint16_t time) {
 	return (0);
 }
 
+// TODO: optimize for shorter patterns
 void arrayCopy(volatile uint32_t destination[250],const volatile uint32_t source[250]){
 	for(int i = 0; i < 250; i++){
 		destination[i] = source[i];
@@ -504,12 +521,12 @@ void setPattern(uint8_t number){
 
 	fadeOngoing = 0;						// Clear fade flag so state is read from memory
 	updatePWM = 1;							// Force PWM period update
-	changePattern = 0;						// Reset pattern change flag
 }
 
 void inputHandler(uint8_t* buffer, uint32_t length){
 	uint8_t index;
 
+	//TODO: change to switch case statement
 	if(*buffer == 0) {
 		if(*(buffer+1) < 5 ){
 			setPattern(*(buffer+1));
@@ -529,10 +546,10 @@ void inputHandler(uint8_t* buffer, uint32_t length){
 
 		while(index<250){
 			if((workingPattern[index] & 0x3) == 0x3) break;
-			index += 2;				// increment by 2 because a pattern step is 64 bits
+			index += 2;				// increment by 2 because a pattern step is 64-bits
 		}
 
-		index++;
+		index++;	//Must increment because of 0 vs 1 based arithmetic
 
 		uint32_t reversed[index],temp;
 
@@ -546,8 +563,9 @@ void inputHandler(uint8_t* buffer, uint32_t length){
 
 		}
 
-		CDC_Transmit_FS(reversed,(index+1)*4);
+		CDC_Transmit_FS(reversed,(index+1)*4); //TODO: double check if +1 still necessary
 	} else {
+		// If not valid input spit out the recieved buffer
 		index=0;
 
 		while(index<length){
@@ -566,12 +584,12 @@ void SysTick_Handler(void) {
 
 	currentTicks = HAL_GetTick();		// Get current ticks value
 	if (currentTicks >= updateTicks) {	// Check if it's time to update PWM
-		updatePWM = 1;					// If so set flag
-		updateTicks += nextUpdateTime;	// Set time for next update
+		updatePWM = 1;					// If so set flag and
+		updateTicks += nextUpdateTime;	// Store time for next update
 	}
 }
 
-/* If button is pressed set pattern change flag */
+/* If button is pressed set changePattern flag */
 void EXTI15_10_IRQHandler(void) {
 	__HAL_GPIO_EXTI_CLEAR_IT(B1_Pin);
 	changePattern = 1;
@@ -581,6 +599,7 @@ void EXTI15_10_IRQHandler(void) {
  * @brief  This function is executed in case of error occurrence.
  * @param  None
  * @retval None
+ * TODO: Either implement or remove. Prefer implement
  */
 void _Error_Handler(char * file, int line) {
 	/* USER CODE BEGIN Error_Handler_Debug */
@@ -598,6 +617,7 @@ void _Error_Handler(char * file, int line) {
  * @param file: pointer to the source file name
  * @param line: assert_param error line source number
  * @retval None
+ * TODO: Either implement or remove. Prefer implement
  */
 void assert_failed(uint8_t* file, uint32_t line)
 {
