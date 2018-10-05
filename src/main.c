@@ -430,8 +430,8 @@ void set_pwm_value(uint16_t periods[4]) {
 }
 
 /* A single pattern STEP requires two 32-bit registers. The have the form:
- * [red 10-bit value]   [green 10-bit value] [blue 10-bit value]  [command 2-bit]
- * [white 10-bit value] [fade 10-bit value]  [dwell 10-bit value] [command 2-bit]
+ * [ch1 10-bit value] [ch2 10-bit value]  [ch3 10-bit value]   [command 2-bit]
+ * [ch4 10-bit value] [fade 10-bit value] [dwell 10-bit value] [command 2-bit]
  *
  * Command bits are 0x01 for first step register, 0x10 for second step register.
  * If the second step register is 0x11 that signifies the end of the pattern (EOF).
